@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cisco SD-Access Traffic Simulator</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    /* 스크롤바 커스텀 및 애니메이션 */
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 8px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #0f172a; 
+      border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #334155; 
+      border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #475569; 
+    }
+    @keyframes fade-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fade-in {
+      animation: fade-in 0.3s ease-out forwards;
+    }
+    body {
+      background-color: #020617; /* slate-950 */
+      color: #e2e8f0; /* slate-200 */
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const FLOW_STEPS = [
+      {
+        id: 0,
+        title: "대기 상태",
+        desc: "Cisco SD-Access 트래픽 플로우 시뮬레이션 준비 완료. '다음 단계'를 클릭하여 12단계의 Fabric 프로세스와 각 단계별 상태 확인(Verification) 명령어를 확인하십시오.",
+        verificationCmd: "준비 상태입니다.",
+        verificationExample: "",
+        packetPos: { x: 5, y: 70 },
+        packetLabel: "Idle",
+        showPacket: false,
+        color: "bg-slate-500",
+      },
+      {
+        id: 1,
+        title: "1. 802.11 Association (단말 -> AP -> WLC)",
+        desc: "단말이 Fabric SSID에 접속을 시도합니다. Fabric AP는 단말의 MAC 주소 및 무선 연결 요청을 CAPWAP 컨트롤 터널을 통해 중앙의 WLC로 전달합니다.",
+        verificationCmd: "[WLC CLI]\nHYS-MPO-ITR-SDA-WLC-01#show wireless client summary\nHYS-MPO-ITR-SDA-WLC-01#show wireless fabric client summary",
+        verificationExample: `Number of Clients: 847
+
+MAC Address    AP Name                                        Type ID   State             Protocol Method     Role
+-------------------------------------------------------------------------------------------------------------------------
+0093.3771.a0a2 HYS-MPO-07F-SDA-AP-05                          WLAN 18   Run               11ax(5)  Dot1x      Local             
+
+
+Number of Fabric Clients : 847
+
+MAC Address    AP Name                                Type ID   State              Protocol Method     L2 VNID    RLOC IP       
+----------------------------------------------------------------------------------------------------------------------
+0093.3771.a0a2 HYS-MPO-07F-SDA-AP-05            WLAN 18   Run                11ax(5)  Dot1x      8208       10.255.7.71  `,
+        packetPos: { x: 17, y: 47.5 }, 
+        packetLabel: "802.11 / CAPWAP",
+        showPacket: true,
+        color: "bg-blue-400",
+      },
+      {
+        id: 2,
+        title: "2. RADIUS 인증 요청 (WLC -> ISE)",
+        desc: "WLC는 단말에서 전달받은 802.1X/EAP 인증 정보를 RADIUS 패킷으로 캡슐화하여 정책 서버인 ISE로 전송(Access-Request)합니다.",
+        verificationCmd: "[WLC CLI]\n# show radius statistics\n# debug radius detail\n# show aaa servers",
+        verificationExample: `HYS-MPO-ITR-SDA-WLC-01#show radius statistics
+                                 Auth.      Acct.       Both
+      Maximum inQ length:          NA         NA          4
+    Maximum waitQ length:          NA         NA        631
+    Maximum doneQ length:          NA         NA          4
+    Total responses seen:   29252723   15882639   45135362
+  Packets with responses:   29252633   15881324   45133957
+ Packets without responses:        135       1167       1302
+ Access Rejects           :     484222
+ Access Accepts           :    2206489
+Average response delay(ms):         60         41         53
+Maximum response delay(ms):       5759       3999       5759
+ Number of Radius timeouts:       2733     147750     150483
+      Radius Timers Started:   29255366   16029074   45284440
+      Radius Timers Created:   29243301   16028980   45272281
+Radius Timers Create Failed:         0          0          0
+      Radius Timers Stopped:   29255366   16029074   45284440
+ Radius Timers Stop Failed:         0          0          0
+ Radius Timers Outstanding:         0          0          0
+        Radius Timers Added:   29243301   16028980   45272281
+   Radius Timers Add Failed:         0          0          0
+    Radius Timers Jitterred:      12065         94      12159
+Radius Timers Jitter Failed:         0          0          0
+        Duplicate ID detects:         6          4         10
+Buffer Allocation Failures:         0          0          0
+Maximum Buffer Size (bytes):       2093       1136       2093
+Malformed Responses        :         0          0          0
+Bad Authenticators         :        11        249        260
+Unknown Responses          :         0          0          0
+ Source Port Range: (2 ports only)
+ 1645 - 1646
+ Last used Source Port/Identifier:
+ 1645/251
+ 1646/117
+
+ Elapsed time since counters last cleared: 23w3d17h13m
+Radius Latency Distribution:
+<= 2ms :     651225        634
+3-5ms  :    7871074    3812576
+5-10ms :    2357252    7925582
+10-20ms:    1354050     462066
+20-50ms:    3518770     449751
+50-100m:    7190013     739130
+>100ms :    6310249    2491585
+
+Current inQ length  : 0
+Current doneQ length: 0
+
+HYS-MPO-ITR-SDA-WLC-01#show aaa servers 
+
+RADIUS: id 1, priority 1, host 10.11.251.12, auth-port 1812, acct-port 1813, hostname dnac-radius_10.11.251.12
+     State: current UP, duration 3096421s, previous duration 12s
+     Dead: total time 393s, count 3
+     Platform State from SMD: current UP, duration 4294967s, previous duration 374s
+     SMD Platform Dead: total time 374s, count 2
+     Platform State from WNCD (0) : current UP, duration 4294967s, previous duration 1944s
+     Platform State from WNCD (1) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (2) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (3) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (4) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (5) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (6) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (7) : current UP, duration 4294967s, previous duration 0s
+     WNCD Platform Dead: total time 736s, count 17UP
+     Quarantined: No
+     Authen: request 21138502, timeouts 1877, failover 23, retransmission 1795
+             Response: accept 1594011, reject 351431, challenge 19191183
+             Response: unexpected 74, server error 0, incorrect 2, time 29ms
+             Transaction: success 21136625, failure 90
+             Throttled: transaction 0, timeout 0, failure 0
+             Malformed responses: 0
+             Bad authenticators: 2
+             Dot1x transactions:
+             Response: total responses: 21124686, avg response time: 62ms
+             Transaction: timeouts 38, failover 23
+             Transaction: total 1933541, success 1590182, failure 343359
+             MAC auth transactions:
+             Response: total responses: 0, avg response time: 0ms
+             Transaction: timeouts 0, failover 0
+             Transaction: total 0, success 0, failure 0
+     Author: request 4, timeouts 0, failover 0, retransmission 0
+             Response: accept 4, reject 0, challenge 0
+             Response: unexpected 0, server error 0, incorrect 0, time 91ms
+             Transaction: success 4, failure 0
+             Throttled: transaction 0, timeout 0, failure 0
+             Malformed responses: 0
+             Bad authenticators: 0
+             MAC author transactions:
+             Response: total responses: 0, avg response time: 0ms
+             Transaction: timeouts 0, failover 0
+             Transaction: total 0, success 0, failure 0
+     Account: request 11681660, timeouts 109164, failover 413, retransmission 107779
+             Request: start 1268307, interim 9037761, stop 1267801
+             Response: start 1268307, interim 9036541, stop 1267647
+             Response: unexpected 814, server error 0, incorrect 173, time 24ms
+             Transaction: success 11572496, failure 1385
+             Throttled: transaction 0, timeout 0, failure 0
+             Malformed responses: 0
+             Bad authenticators: 186
+     Elapsed time since counters last cleared: 23w3d17h14m
+     Estimated Outstanding Access Transactions: 0
+     Estimated Outstanding Accounting Transactions: 0
+     Estimated Throttled Access Transactions: 0
+     Estimated Throttled Accounting Transactions: 0
+     Maximum Throttled Transactions: access 0, accounting 0
+     Consecutive Response Failures: total 1383
+             SMD Platform : max 11, current 0 total 11
+             WNCD Platform: max 1164, current 0 total 1351
+             IOSD Platform : max 21, current 0 total 21
+     Consecutive Timeouts: total 17005
+             SMD Platform : max 47, current 0 total 47
+             WNCD Platform: max 4656, current 0 total 16871
+             IOSD Platform : max 87, current 0 total 87
+     Requests per minute past 24 hours:
+             high - 2 hours, 0 minutes ago: 14
+             low  - 17 hours, 12 minutes ago: 0
+             average: 0
+
+RADIUS: id 2, priority 2, host 10.11.251.18, auth-port 1812, acct-port 1813, hostname dnac-radius_10.11.251.18
+     State: current UP, duration 3096414s, previous duration 20s
+     Dead: total time 417s, count 3
+     Platform State from SMD: current UP, duration 4294967s, previous duration 371s
+     SMD Platform Dead: total time 371s, count 2
+     Platform State from WNCD (0) : current UP, duration 4294967s, previous duration 868s
+     Platform State from WNCD (1) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (2) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (3) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (4) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (5) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (6) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (7) : current UP, duration 4294967s, previous duration 0s
+     WNCD Platform Dead: total time 287s, count 21UP
+     Quarantined: No
+     Authen: request 8117073, timeouts 856, failover 20, retransmission 760
+             Response: accept 612414, reject 132786, challenge 7371017
+             Response: unexpected 6, server error 0, incorrect 0, time 26ms
+             Transaction: success 8116217, failure 106
+             Throttled: transaction 0, timeout 0, failure 0
+             Malformed responses: 0
+             Bad authenticators: 0
+             Dot1x transactions:
+             Response: total responses: 8116207, avg response time: 56ms
+             Transaction: timeouts 46, failover 20
+             Transaction: total 745236, success 612414, failure 132822
+             MAC auth transactions:
+             Response: total responses: 0, avg response time: 0ms
+             Transaction: timeouts 0, failover 0
+             Transaction: total 0, success 0, failure 0
+     Author: request 0, timeouts 0, failover 0, retransmission 0
+             Response: accept 0, reject 0, challenge 0
+             Response: unexpected 0, server error 0, incorrect 0, time 0ms
+             Transaction: success 0, failure 0
+             Throttled: transaction 0, timeout 0, failure 0
+             Malformed responses: 0
+             Bad authenticators: 0
+             MAC author transactions:
+             Response: total responses: 0, avg response time: 0ms
+             Transaction: timeouts 0, failover 0
+             Transaction: total 0, success 0, failure 0
+     Account: request 4347509, timeouts 38586, failover 1103, retransmission 37288
+             Request: start 482081, interim 3346221, stop 481906
+             Response: start 482081, interim 3345088, stop 481753
+             Response: unexpected 275, server error 0, incorrect 53, time 23ms
+             Transaction: success 4308923, failure 1298
+             Throttled: transaction 0, timeout 0, failure 0
+             Malformed responses: 0
+             Bad authenticators: 63
+     Elapsed time since counters last cleared: 23w3d17h14m
+     Estimated Outstanding Access Transactions: 0
+     Estimated Outstanding Accounting Transactions: 0
+     Estimated Throttled Access Transactions: 0
+     Estimated Throttled Accounting Transactions: 0
+     Maximum Throttled Transactions: access 0, accounting 0
+     Consecutive Response Failures: total 1324
+             SMD Platform : max 26, current 0 total 26
+             WNCD Platform: max 1145, current 0 total 1275
+             IOSD Platform : max 23, current 0 total 23
+     Consecutive Timeouts: total 12092
+             SMD Platform : max 107, current 0 total 107
+             WNCD Platform: max 4590, current 0 total 11890
+             IOSD Platform : max 95, current 0 total 95
+     Requests per minute past 24 hours:
+             high - 17 hours, 12 minutes ago: 0
+             low  - 17 hours, 12 minutes ago: 0
+             average: 0
+
+RADIUS: id 3, priority 3, host UNKNOWN, auth-port 65535, acct-port 65535, hostname ISE2
+     State: current UP, duration 4294967s, previous duration 0s
+     Dead: total time 0s, count 0
+     Platform State from SMD: current UP, duration 4294967s, previous duration 0s
+     SMD Platform Dead: total time 0s, count 0
+     Platform State from WNCD (0) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (1) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (2) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (3) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (4) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (5) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (6) : current UP, duration 4294967s, previous duration 0s
+     Platform State from WNCD (7) : current UP, duration 4294967s, previous duration 0s
+     WNCD Platform Dead: total time 0s, count 0UP
+     Quarantined: No
+     Authen: request 0, timeouts 0, failover 0, retransmission 0
+             Response: accept 0, reject 0, challenge 0
+             Response: unexpected 0, server error 0, incorrect 0, time 0ms
+             Transaction: success 0, failure 0
+             Throttled: transaction 0, timeout 0, failure 0
+             Malformed responses: 0
+             Bad authenticators: 0
+             Dot1x transactions:
+             Response: total responses: 0, avg response time: 0ms
+             Transaction: timeouts 0, failover 0
+             Transaction: total 0, success 0, failure 0
+             MAC auth transactions:
+             Response: total responses: 0, avg response time: 0ms
+             Transaction: timeouts 0, failover 0
+             Transaction: total 0, success 0, failure 0
+     Author: request 0, timeouts 0, failover 0, retransmission 0
+             Response: accept 0, reject 0, challenge 0
+             Response: unexpected 0, server error 0, incorrect 0, time 0ms
+             Transaction: success 0, failure 0
+             Throttled: transaction 0, timeout 0, failure 0
+             Malformed responses: 0
+             Bad authenticators: 0
+             MAC author transactions:
+             Response: total responses: 0, avg response time: 0ms
+             Transaction: timeouts 0, failover 0
+             Transaction: total 0, success 0, failure 0
+     Account: request 0, timeouts 0, failover 0, retransmission 0
+             Request: start 0, interim 0, stop 0
+             Response: start 0, interim 0, stop 0
+             Response: unexpected 0, server error 0, incorrect 0, time 0ms
+             Transaction: success 0, failure 0
+             Throttled: transaction 0, timeout 0, failure 0
+             Malformed responses: 0
+             Bad authenticators: 0
+     Elapsed time since counters last cleared: 23w3d17h14m
+     Estimated Outstanding Access Transactions: 0
+     Estimated Outstanding Accounting Transactions: 0
+     Estimated Throttled Access Transactions: 0
+     Estimated Throttled Accounting Transactions: 0
+     Maximum Throttled Transactions: access 0, accounting 0
+     Consecutive Response Failures: total 0
+             SMD Platform : max 0, current 0 total 0
+             WNCD Platform: max 0, current 0 total 0
+             IOSD Platform : max 0, current 0 total 0
+     Consecutive Timeouts: total 0
+             SMD Platform : max 0, current 0 total 0
+             WNCD Platform: max 0, current 0 total 0
+             IOSD Platform : max 0, current 0 total 0
+     Requests per minute past 24 hours:
+             high - 17 hours, 12 minutes ago: 0
+             low  - 17 hours, 12 minutes ago: 0
+             average: 0`,
+        packetPos: { x: 26, y: 25 }, 
+        packetLabel: "RADIUS Req",
+        showPacket: true,
+        color: "bg-indigo-400",
+      },
+      {
+        id: 3,
+        title: "3. 백엔드 인증 (ISE <-> AD)",
+        desc: "ISE는 자체 DB에 사용자가 없거나 AD 연동 정책에 따라, 백엔드의 Active Directory 서버로 MS-RPC/LDAP/Kerberos 질의를 보내어 사용자 계정을 검증합니다.",
+        verificationCmd: "[ISE GUI]\nOperations > RADIUS > Live Logs 에서 상태 확인\nAuthentication Details에서 AD 연동 성공 여부 확인",
+        verificationExample: "",
+        packetPos: { x: 44, y: 25 },
+        packetLabel: "LDAP / MS-RPC",
+        showPacket: true,
+        color: "bg-yellow-400",
+      },
+      {
+        id: 4,
+        title: "4. 정책 인가 및 VN 매핑 (ISE -> WLC/Edge)",
+        desc: "AD 인증 성공 시 ISE는 Access-Accept와 함께 사용자의 권한 정보인 SGT(보안 그룹 태그) 및 소속될 L2 VN (VLAN/VNI) 정보를 WLC와 Edge Node에 푸시합니다.",
+        verificationCmd: "[WLC CLI]\n# show ap cdp neighbors\n\n[Edge Switch CLI]\n# show cts role-based sgt-map all",
+        verificationExample: `HYS-MPO-ITR-SDA-WLC-01#show ap cdp neighbors | i HYS-MPO-07F-SDA-AP-05
+AP Name                          AP IP                                      Neighbor Name                              Neighbor IP        Neighbor Port
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+HYS-MPO-07F-SDA-AP-05            10.255.8.54                               HYS-MPO-07F-SDA-L2S-01                     10.255.7.71        Ten
+
+HYS-MPO-07F-SDA-L2S-01#show cts role-based sgt-map all
+Active IPv4-SGT Bindings Information
+
+IP Address              SGT     Source
+============================================
+Active IPv6-SGT Bindings Information
+
+IP Address                                          SGT     Source
+================================================================`,
+        packetPos: { x: 25, y: 47.5 }, 
+        packetLabel: "Policy Push (SGT/VN)",
+        showPacket: true,
+        color: "bg-pink-400",
+      },
+      {
+        id: 5,
+        title: "5. DHCP Discover (단말 -> Edge)",
+        desc: "권한을 부여받은 단말이 IP 할당을 위해 DHCP Discover 브로드캐스트를 전송합니다. AP는 이를 즉시 VXLAN으로 캡슐화하여 Anycast GW인 Edge Node로 전달합니다.",
+        verificationCmd: "[Edge Switch CLI]\n# show ip dhcp snooping binding\n# debug ip dhcp server packet",
+        verificationExample: "",
+        packetPos: { x: 25, y: 70 }, 
+        packetLabel: "DHCP Discover",
+        showPacket: true,
+        color: "bg-cyan-300",
+      },
+      {
+        id: 6,
+        title: "6. DHCP Relay 및 IP 할당 (Edge <-> IPAM)",
+        desc: "Edge Node는 DHCP 트래픽을 인터셉트하고, 해당 L3 VN (VRF) 라우팅 테이블을 참조하여 유니캐스트로 외부 IPAM(DHCP 서버)에 릴레이합니다.",
+        verificationCmd: "[Edge Switch CLI]\n# show ip route vrf <VN_Name>\n# show run interface Vlan<ID> (ip helper-address 확인)",
+        verificationExample: "",
+        packetPos: { x: 50, y: 47.5 }, 
+        packetLabel: "DHCP Relay (L3 VN)",
+        showPacket: true,
+        color: "bg-cyan-500",
+      },
+      {
+        id: 7,
+        title: "7. LISP EID 단말 등록 (Edge -> CP Node)",
+        desc: "Edge Node의 Device Tracking이 단말의 IP 획득을 감지합니다. Edge는 단말의 EID(IP/MAC), L2/L3 VN, SGT 정보를 자신의 RLOC와 묶어 CP 노드에 LISP Map-Register로 등록합니다.",
+        verificationCmd: "[Edge Switch CLI]\n# show device-tracking database\n\n[CP Node CLI]\n# show lisp site <VRF_Name> detail",
+        verificationExample: "",
+        packetPos: { x: 50, y: 88 }, 
+        packetLabel: "LISP Map-Register",
+        showPacket: true,
+        color: "bg-purple-500",
+      },
+      {
+        id: 8,
+        title: "8. 외부 통신 시도 및 위치 질의 (Edge -> CP Node)",
+        desc: "단말이 외부 인터넷망으로 트래픽을 전송합니다. Edge Node는 목적지 IP가 내부 테이블에 없으므로, 대상의 RLOC를 묻는 LISP Map-Request를 CP 노드에 전송합니다.",
+        verificationCmd: "[Edge Switch CLI]\n# show lisp instance-id <L3_VNI> ipv4 map-cache\n# debug lisp control-plane message",
+        verificationExample: "",
+        packetPos: { x: 50, y: 52 }, 
+        packetLabel: "LISP Map-Request",
+        showPacket: true,
+        color: "bg-fuchsia-400",
+      },
+      {
+        id: 9,
+        title: "9. 외부 출구 응답 (CP Node -> Edge)",
+        desc: "CP 노드(Map-Server)는 목적지가 패브릭 외부임을 확인합니다. 따라서 외부망 출구인 'Proxy ETR(Border Node)'의 RLOC를 LISP Map-Reply로 Edge에 반환합니다.",
+        verificationCmd: "[Edge Switch CLI]\n# show lisp instance-id <L3_VNI> ipv4 map-cache <Dest_IP>",
+        verificationExample: "",
+        packetPos: { x: 50, y: 88 }, 
+        packetLabel: "LISP Map-Reply",
+        showPacket: true,
+        color: "bg-purple-300",
+      },
+      {
+        id: 10,
+        title: "10. VXLAN-GPO 데이터 캡슐화 (Edge -> Border)",
+        desc: "위치를 확인한 Edge Node는 유저 트래픽을 L3 VNI 와 SGT 가 포함된 VXLAN-GPO 로 캡슐화하여 Underlay를 통해 Border Node로 전송합니다 (Data Plane).",
+        verificationCmd: "[Edge Switch CLI]\n# show isis neighbors\n# show interfaces tunnel 0",
+        verificationExample: "",
+        packetPos: { x: 50, y: 70 }, 
+        packetLabel: "VXLAN-GPO (L3 VNI/SGT)",
+        showPacket: true,
+        color: "bg-green-500",
+      },
+      {
+        id: 11,
+        title: "11. VRF Handoff (Border -> Fusion)",
+        desc: "Border Node는 패킷의 VXLAN 헤더를 벗겨내고(Decap), 내부 L3 VNI를 확인하여 매핑된 외부 VRF-Lite 로 전환(VRF Handoff)하여 Fusion Router로 라우팅합니다.",
+        verificationCmd: "[Border Switch CLI]\n# show ip route vrf <VN_Name>\n# show bgp vpnv4 unicast vrf <VN_Name>",
+        verificationExample: "",
+        packetPos: { x: 72.5, y: 70 }, 
+        packetLabel: "Native IP (VRF-Lite)",
+        showPacket: true,
+        color: "bg-orange-500",
+      },
+      {
+        id: 12,
+        title: "12. 보안 검사 및 NAT (Fusion -> NGFW)",
+        desc: "Fusion Router를 통과한 패킷이 방화벽에 도달합니다. NGFW는 IP 주소 및 유지된 SGT를 기반으로 TrustSec 정책을 적용하고, NAT(PAT)를 거쳐 최종 인터넷으로 전송합니다.",
+        verificationCmd: "[Firewall CLI/GUI]\n# show nat translations\n# show cts role-based sgt-map all",
+        verificationExample: "",
+        packetPos: { x: 88, y: 70 }, 
+        packetLabel: "Inspected IP / NAT",
+        showPacket: true,
+        color: "bg-red-500",
+      }
+    ];
+
+    const NODES = [
+      { id: 'wlc', label: 'WLC\n(Wireless CP)', icon: 'fa-tower-broadcast', x: 17, y: 25 },
+      { id: 'ise', label: 'ISE\n(Policy/Radius)', icon: 'fa-user-check', x: 35, y: 25 },
+      { id: 'ad', label: 'Active Directory\n(Identity DB)', icon: 'fa-users', x: 53, y: 25 },
+      { id: 'ipam', label: 'IPAM\n(DHCP/DNS)', icon: 'fa-database', x: 70, y: 25 },
+      { id: 'user', label: '단말\n(Endpoint)', icon: 'fa-laptop', x: 5, y: 70 },
+      { id: 'ap', label: 'Fabric AP\n(Local Mode)', icon: 'fa-wifi', x: 17, y: 70 },
+      { id: 'edge', label: 'Edge Node\n(Anycast GW)', icon: 'fa-network-wired', x: 33, y: 70 },
+      { id: 'border_cp', label: 'Border / CP\n(Proxy ETR)', icon: 'fa-server', icon2: 'fa-microchip', x: 60, y: 70 },
+      { id: 'fusion', label: 'Fusion Router\n(VRF Leaking)', icon: 'fa-route', x: 77, y: 70 },
+      { id: 'fw', label: 'NGFW\n(TrustSec/NAT)', icon: 'fa-shield-halved', x: 93, y: 70 }
+    ];
+
+    function App() {
+      const [currentStep, setCurrentStep] = useState(0);
+      const [logs, setLogs] = useState([]);
+      const [isPlaying, setIsPlaying] = useState(false);
+      const playIntervalRef = useRef(null);
+      const logContainerRef = useRef(null);
+
+      useEffect(() => {
+        if (currentStep > 0) {
+          setLogs(FLOW_STEPS.slice(1, currentStep + 1));
+        } else {
+          setLogs([]);
+        }
+      }, [currentStep]);
+
+      // 자동 스크롤
+      useEffect(() => {
+        if (logContainerRef.current) {
+          logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+        }
+      }, [logs]);
+
+      useEffect(() => {
+        if (isPlaying) {
+          playIntervalRef.current = setInterval(() => {
+            setCurrentStep(prev => {
+              if (prev >= FLOW_STEPS.length - 1) {
+                setIsPlaying(false);
+                return prev;
+              }
+              return prev + 1;
+            });
+          }, 4000);
+        } else {
+          clearInterval(playIntervalRef.current);
+        }
+        return () => clearInterval(playIntervalRef.current);
+      }, [isPlaying]);
+
+      const handleNext = () => {
+        if (currentStep < FLOW_STEPS.length - 1) {
+          setCurrentStep(prev => prev + 1);
+        }
+      };
+
+      const handlePrev = () => {
+        if (currentStep > 0) {
+          setCurrentStep(prev => prev - 1);
+        }
+      };
+
+      const handleReset = () => {
+        setIsPlaying(false);
+        setCurrentStep(0);
+      };
+
+      const activeStepData = FLOW_STEPS[currentStep];
+
+      const highlightText = (text) => {
+        const parts = text.split(/(L[23] VN|L[23] VNI|VRF|VRF-Lite|SGT|VXLAN-GPO|LISP|EID|RLOC|CAPWAP|TrustSec|Device Tracking|AD|Active Directory|LDAP|Kerberos|RADIUS)/g);
+        return parts.map((part, index) => {
+          if (['L2 VN', 'L2 VNI'].includes(part)) {
+            return <span key={index} className="text-cyan-300 font-bold bg-cyan-900/30 px-1 rounded">{part}</span>;
+          } else if (['L3 VN', 'L3 VNI', 'VRF', 'VRF-Lite'].includes(part)) {
+            return <span key={index} className="text-orange-300 font-bold bg-orange-900/30 px-1 rounded">{part}</span>;
+          } else if (part === 'SGT' || part === 'TrustSec') {
+            return <span key={index} className="text-pink-300 font-bold bg-pink-900/30 px-1 rounded">{part}</span>;
+          } else if (part === 'VXLAN-GPO') {
+            return <span key={index} className="text-green-300 font-bold bg-green-900/30 px-1 rounded">{part}</span>;
+          } else if (['LISP', 'EID', 'RLOC'].includes(part)) {
+            return <span key={index} className="text-purple-300 font-bold bg-purple-900/30 px-1 rounded">{part}</span>;
+          } else if (['CAPWAP', 'Device Tracking'].includes(part)) {
+            return <span key={index} className="text-blue-300 font-bold bg-blue-900/30 px-1 rounded">{part}</span>;
+          } else if (['AD', 'Active Directory', 'LDAP', 'Kerberos'].includes(part)) {
+            return <span key={index} className="text-yellow-300 font-bold bg-yellow-900/30 px-1 rounded">{part}</span>;
+          } else if (part === 'RADIUS') {
+            return <span key={index} className="text-indigo-300 font-bold bg-indigo-900/30 px-1 rounded">{part}</span>;
+          }
+          return part;
+        });
+      };
+
+      return (
+        <div className="min-h-screen bg-slate-950 text-slate-200 p-4 font-sans flex flex-col">
+          <header className="mb-5 border-b border-slate-800 pb-4 flex justify-between items-end">
+            <div>
+              <h1 className="text-2xl font-bold text-blue-400 flex items-center gap-3">
+                <i className="fa-solid fa-list-ol text-3xl text-yellow-400"></i>
+                SD-Access 트래픽 플로우 세밀 시뮬레이터 (12단계 & 트러블슈팅)
+              </h1>
+              <p className="text-slate-400 text-sm mt-2 max-w-4xl">
+                단말의 802.1X 접속부터 방화벽 외부 전송까지 12단계 흐름을 분석하며, 각 단계에서 장비에 접속하여 상태를 확인할 수 있는 실무 CLI 명령어를 제공합니다.
+              </p>
+            </div>
+            <div className="bg-slate-900 border border-slate-700 px-4 py-2 rounded-lg text-center hidden md:block">
+              <span className="text-xs text-slate-400 block mb-1">현재 진행 단계</span>
+              <span className="text-xl font-bold text-blue-400">{currentStep} / 12</span>
+            </div>
+          </header>
+
+          {/* 시각화 캔버스 영역 */}
+          <div className="relative w-full bg-slate-900 rounded-xl border border-slate-800 shadow-2xl overflow-hidden mb-6" style={{ height: '480px', minHeight: '480px' }}>
+            
+            {/* SVG 연결선 */}
+            <svg className="absolute inset-0 w-full h-full pointer-events-none">
+              <defs>
+                <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                  <polygon points="0 0, 10 3.5, 0 7" fill="#475569" />
+                </marker>
+                <marker id="arrowhead-active" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                  <polygon points="0 0, 10 3.5, 0 7" fill="#3b82f6" />
+                </marker>
+                <marker id="arrowhead-purple" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                  <polygon points="0 0, 10 3.5, 0 7" fill="#a855f7" />
+                </marker>
+                <marker id="arrowhead-purple-light" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                  <polygon points="0 0, 10 3.5, 0 7" fill="#d8b4fe" />
+                </marker>
+                <marker id="arrowhead-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                  <polygon points="0 0, 10 3.5, 0 7" fill="#22c55e" />
+                </marker>
+                <marker id="arrowhead-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                  <polygon points="0 0, 10 3.5, 0 7" fill="#06b6d4" />
+                </marker>
+                <marker id="arrowhead-pink" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                  <polygon points="0 0, 10 3.5, 0 7" fill="#f472b6" />
+                </marker>
+                <marker id="arrowhead-yellow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                  <polygon points="0 0, 10 3.5, 0 7" fill="#eab308" />
+                </marker>
+              </defs>
+
+              <line x1="5%" y1="70%" x2="17%" y2="70%" stroke={(currentStep >= 1 && currentStep <= 5) ? "#3b82f6" : "#334155"} strokeWidth="3" markerEnd={(currentStep >= 1 && currentStep <= 5) ? "url(#arrowhead-active)" : "url(#arrowhead)"} className="transition-colors duration-500" />
+              <line x1="17%" y1="70%" x2="33%" y2="70%" stroke={(currentStep >= 5 && currentStep <= 6) ? "#22d3ee" : "#334155"} strokeWidth="3" markerEnd={(currentStep >= 5 && currentStep <= 6) ? "url(#arrowhead-cyan)" : "url(#arrowhead)"} className="transition-colors duration-500" />
+              <line x1="33%" y1="70%" x2="60%" y2="70%" stroke={currentStep >= 10 ? "#22c55e" : "#334155"} strokeWidth={currentStep >= 10 ? "5" : "3"} markerEnd={currentStep >= 10 ? "url(#arrowhead-green)" : "url(#arrowhead)"} className="transition-all duration-500" />
+              <line x1="60%" y1="70%" x2="77%" y2="70%" stroke={currentStep >= 11 ? "#f97316" : "#334155"} strokeWidth="3" markerEnd={currentStep >= 11 ? "url(#arrowhead-active)" : "url(#arrowhead)"} className="transition-colors duration-500" />
+              <line x1="77%" y1="70%" x2="93%" y2="70%" stroke={currentStep >= 12 ? "#ef4444" : "#334155"} strokeWidth="3" markerEnd={currentStep >= 12 ? "url(#arrowhead-active)" : "url(#arrowhead)"} className="transition-colors duration-500" />
+              
+              <line x1="17%" y1="70%" x2="17%" y2="25%" stroke={currentStep === 1 ? "#3b82f6" : currentStep === 4 ? "#f472b6" : "#334155"} strokeWidth="2.5" strokeDasharray="6,4" markerEnd={currentStep === 1 ? "url(#arrowhead-active)" : currentStep === 4 ? "url(#arrowhead-pink)" : "url(#arrowhead)"} className="transition-colors duration-500" />
+              <line x1="17%" y1="25%" x2="35%" y2="25%" stroke={currentStep === 2 ? "#818cf8" : currentStep === 4 ? "#f472b6" : "#334155"} strokeWidth="3" markerEnd={currentStep === 2 ? "url(#arrowhead-active)" : currentStep === 4 ? "url(#arrowhead-pink)" : "url(#arrowhead)"} className="transition-colors duration-500" />
+              <line x1="35%" y1="25%" x2="53%" y2="25%" stroke={currentStep === 3 ? "#eab308" : "#334155"} strokeWidth="3" markerEnd={currentStep === 3 ? "url(#arrowhead-yellow)" : "url(#arrowhead)"} className="transition-colors duration-500" />
+              <line x1="35%" y1="25%" x2="33%" y2="70%" stroke={currentStep === 4 ? "#f472b6" : "transparent"} strokeWidth="2" strokeDasharray="4,4" markerEnd={currentStep === 4 ? "url(#arrowhead-pink)" : ""} className="transition-colors duration-500" />
+              <line x1="33%" y1="70%" x2="70%" y2="25%" stroke={currentStep === 6 ? "#06b6d4" : "#334155"} strokeWidth="2.5" strokeDasharray="5,5" markerEnd={currentStep === 6 ? "url(#arrowhead-cyan)" : "url(#arrowhead)"} className="transition-colors duration-500" />
+              
+              <path d="M 33 70 Q 46.5 40 60 70" fill="none" stroke={currentStep === 8 ? "#e879f9" : "transparent"} strokeWidth="2.5" strokeDasharray="6,4" markerEnd={currentStep === 8 ? "url(#arrowhead-purple)" : ""} className="transition-colors duration-500" vectorEffect="non-scaling-stroke" />
+              <path d="M 33 70 Q 46.5 100 60 70" fill="none" stroke={currentStep === 7 ? "#a855f7" : currentStep === 9 ? "#d8b4fe" : "transparent"} strokeWidth="2.5" strokeDasharray="6,4" markerEnd={currentStep === 7 ? "url(#arrowhead-purple)" : currentStep === 9 ? "url(#arrowhead-purple-light)" : ""} className="transition-colors duration-500" vectorEffect="non-scaling-stroke" />
+            </svg>
+
+            {/* 노드 (장비) 렌더링 */}
+            {NODES.map((node) => {
+              let isActive = false;
+              if (currentStep === 0 && node.id === 'user') isActive = true;
+              if (currentStep === 1 && ['user', 'ap', 'wlc'].includes(node.id)) isActive = true;
+              if (currentStep === 2 && ['wlc', 'ise'].includes(node.id)) isActive = true;
+              if (currentStep === 3 && ['ise', 'ad'].includes(node.id)) isActive = true; 
+              if (currentStep === 4 && ['ise', 'wlc', 'ap', 'edge'].includes(node.id)) isActive = true;
+              if (currentStep === 5 && ['user', 'ap', 'edge'].includes(node.id)) isActive = true;
+              if (currentStep === 6 && ['edge', 'ipam'].includes(node.id)) isActive = true;
+              if (currentStep === 7 && ['edge', 'border_cp'].includes(node.id)) isActive = true;
+              if (currentStep === 8 && ['edge', 'border_cp'].includes(node.id)) isActive = true;
+              if (currentStep === 9 && ['edge', 'border_cp'].includes(node.id)) isActive = true;
+              if (currentStep === 10 && ['edge', 'border_cp'].includes(node.id)) isActive = true;
+              if (currentStep === 11 && ['border_cp', 'fusion'].includes(node.id)) isActive = true;
+              if (currentStep === 12 && ['fusion', 'fw'].includes(node.id)) isActive = true;
+
+              const isAd = node.id === 'ad';
+              const nodeColorClass = isAd && isActive ? 'border-yellow-500 shadow-[0_0_25px_rgba(234,179,8,0.5)]' : 
+                                     isActive ? 'border-blue-500 shadow-[0_0_25px_rgba(59,130,246,0.5)]' : 'border-slate-800';
+
+              return (
+                <div 
+                  key={node.id}
+                  className={`absolute flex flex-col items-center justify-center transform -translate-x-1/2 -translate-y-1/2 transition-all duration-300 ${isActive ? 'scale-110 opacity-100 z-10' : 'scale-100 opacity-40 z-0'}`}
+                  style={{ left: `${node.x}%`, top: `${node.y}%` }}
+                >
+                  <div className={`p-4 rounded-xl flex items-center justify-center gap-2 border-2 ${isActive ? 'bg-slate-800' : 'bg-slate-800/60 border-opacity-50'} ${nodeColorClass}`}>
+                    <i className={`fa-solid ${node.icon} text-3xl ${isActive && isAd ? 'text-yellow-400' : isActive ? 'text-blue-400' : 'text-slate-500'}`}></i>
+                    {node.icon2 && <i className={`fa-solid ${node.icon2} text-xl ${isActive ? 'text-purple-400' : 'text-slate-600'}`}></i>}
+                  </div>
+                  <span className="mt-2 text-[10px] sm:text-[11px] font-semibold text-center whitespace-pre-line leading-snug bg-slate-900/90 px-2 py-1.5 rounded-md border border-slate-800 text-slate-300 shadow-md">
+                    {node.label}
+                  </span>
+                </div>
+              );
+            })}
+
+            {/* 애니메이션 패킷 플로우 아이콘 */}
+            <div 
+              className={`absolute transform -translate-x-1/2 -translate-y-1/2 transition-all duration-700 ease-in-out z-20 flex flex-col items-center ${activeStepData.showPacket ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}`}
+              style={{ left: `${activeStepData.packetPos.x}%`, top: `${activeStepData.packetPos.y}%` }}
+            >
+              <div className="mb-2 text-[11px] font-bold bg-white text-slate-900 px-3 py-1.5 rounded-md shadow-[0_4px_12px_rgba(0,0,0,0.8)] whitespace-nowrap border-b-2 border-slate-400">
+                {activeStepData.packetLabel}
+              </div>
+              <div className={`w-5 h-5 rounded-full shadow-[0_0_20px_currentColor] animate-ping opacity-70 absolute bottom-0 ${activeStepData.color}`}></div>
+              <div className={`w-5 h-5 rounded-full shadow-[0_0_10px_currentColor] relative ${activeStepData.color}`}></div>
+            </div>
+          </div>
+
+          {/* 컨트롤, 정보 및 검증 영역 */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
+            
+            {/* 아키텍처 로그 및 제어 패널 (왼쪽) */}
+            <div className="lg:col-span-5 bg-slate-900 p-5 rounded-xl border border-slate-800 flex flex-col h-[40rem]">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-bold flex items-center gap-2 text-slate-200">
+                  <i className="fa-solid fa-layer-group text-purple-400 text-xl"></i>
+                  Architecture Log
+                </h2>
+              </div>
+              
+              <div ref={logContainerRef} className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar mb-4">
+                {logs.length === 0 ? (
+                  <div className="text-slate-500 text-sm italic flex h-full items-center justify-center text-center px-4">
+                    시뮬레이션을 시작하면 아키텍처 동작 로그가 이곳에 기록됩니다.
+                  </div>
+                ) : (
+                  logs.map((log) => (
+                    <div key={log.id} className="bg-slate-950/60 p-3 rounded-lg border border-slate-800/80 flex gap-4 animate-fade-in shadow-sm hover:border-slate-700 transition-colors">
+                      <div className={`mt-1 w-6 h-6 rounded-full flex items-center justify-center text-[12px] font-bold text-slate-900 shrink-0 shadow-md ${log.color}`}>
+                        {log.id}
+                      </div>
+                      <div>
+                        <h4 className="text-[13.5px] font-bold text-slate-200 mb-1">{log.title}</h4>
+                        <p className="text-[12.5px] text-slate-400 leading-relaxed font-mono tracking-tight">
+                          {highlightText(log.desc)}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* 제어 버튼 영역 */}
+              <div className="flex flex-col gap-3 mt-auto pt-4 border-t border-slate-800">
+                <div className="flex gap-2">
+                  <button 
+                    onClick={handleNext}
+                    disabled={currentStep >= FLOW_STEPS.length - 1 || isPlaying}
+                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-lg flex items-center justify-center gap-2 font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-900/50"
+                  >
+                    <i className="fa-solid fa-forward-step"></i> 다음 단계
+                  </button>
+                  <button 
+                    onClick={handlePrev}
+                    disabled={currentStep === 0 || isPlaying}
+                    className="w-20 flex-shrink-0 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-lg flex items-center justify-center transition-colors border border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="이전 단계"
+                  >
+                    이전
+                  </button>
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => setIsPlaying(!isPlaying)}
+                    disabled={currentStep >= FLOW_STEPS.length - 1}
+                    className={`flex-1 py-3 rounded-lg flex items-center justify-center gap-2 font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed ${isPlaying ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-lg shadow-amber-900/50' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/50'}`}
+                  >
+                    {isPlaying ? '일시 정지' : <><i className="fa-solid fa-play"></i> 자동 재생</>}
+                  </button>
+                  <button 
+                    onClick={handleReset}
+                    className="w-20 flex-shrink-0 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-lg flex items-center justify-center transition-colors"
+                    title="초기화"
+                  >
+                    <i className="fa-solid fa-rotate-left"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* 검증 명령어 및 예시 패널 (오른쪽 분리) */}
+            <div className="lg:col-span-7 flex flex-col gap-6 h-[40rem]">
+              
+              {/* 검증 명령어 (Commands Only) */}
+              <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 flex flex-col h-[30%] shrink-0">
+                <h2 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-200">
+                  <i className="fa-solid fa-terminal text-emerald-400 text-xl"></i>
+                  검증 명령어
+                </h2>
+                <div className="bg-slate-950/80 p-4 rounded-lg border border-slate-700/60 flex-1 relative overflow-hidden flex flex-col">
+                  <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500 rounded-l-lg"></div>
+                  <pre className="text-emerald-300 text-[13px] font-mono whitespace-pre-wrap leading-relaxed bg-black/30 p-3 rounded border border-emerald-900/30 ml-2 overflow-auto custom-scrollbar">
+                    {activeStepData.verificationCmd}
+                  </pre>
+                </div>
+              </div>
+
+              {/* 검증 명령어 예시 (Examples Only) */}
+              <div className="bg-slate-900 p-5 rounded-xl border border-slate-800 flex flex-col flex-1 min-h-0">
+                <h2 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-200 shrink-0">
+                  <i className="fa-solid fa-file-lines text-blue-400 text-xl"></i>
+                  검증 명령어 예시
+                </h2>
+                <div className="bg-slate-950/80 p-4 rounded-lg border border-slate-700/60 flex-1 relative flex flex-col min-h-0">
+                  <div className="absolute top-0 left-0 w-1 h-full bg-blue-500 rounded-l-lg"></div>
+                  <pre className="text-blue-300 text-[12px] font-mono whitespace-pre leading-relaxed bg-black/30 p-4 rounded border border-blue-900/30 ml-2 flex-1 overflow-auto custom-scrollbar min-h-0">
+                    {activeStepData.verificationExample || "해당 단계의 출력 예시 데이터가 없습니다."}
+                  </pre>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

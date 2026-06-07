@@ -10,6 +10,7 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Noto Sans KR', sans-serif; background: #f8fafc; color: #1e293b; }
   @keyframes fadeUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+  .back-btn:hover { color: #4f46e5 !important; }
 </style>
 </head>
 <body>
@@ -204,6 +205,11 @@ function App() {
 
   return e('div', {style:{minHeight:"100vh",padding:"24px 16px",display:"flex",flexDirection:"column",alignItems:"center"}},
     e('div', {style:{maxWidth:560,width:"100%",marginTop:8}},
+
+      // 돌아가기 버튼 (추가됨)
+      e('div', {style:{marginBottom: 16}},
+        e('a', {href:"index.html", className: "back-btn", style:{textDecoration:"none", color:"#64748b", fontSize:13, fontWeight:700, display:"inline-flex", alignItems:"center", transition:"color 0.2s ease"}}, "← 메인 포털로 돌아가기")
+      ),
 
       // Header
       e('div', {style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:24}},
